@@ -1,5 +1,7 @@
+# -*- coding: utf-8 -*-
 import os
 from pathlib import Path
+import sys
 
 from dotenv import load_dotenv
 import pytesseract
@@ -22,7 +24,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 load_dotenv()
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
-LLM_MODEL = "mistral"
+LLM_MODEL = os.getenv("LLM_MODEL", "mistral")
 EMBEDDING_MODEL = "nomic-embed-text"
 DATA_DIR = Path("data")
 CHROMA_DIR = Path("chroma_db")
@@ -53,6 +55,8 @@ def load_ocr_documents(data_dir):
         try:
             with Image.open(image_path) as image:
                 text = pytesseract.image_to_string(image).strip()
+                # Ensure text is properly encoded as UTF-8
+                text = text.encode('utf-8', errors='replace').decode('utf-8')
         except pytesseract.TesseractNotFoundError as exc:
             raise RuntimeError(
                 "Tesseract OCR is not installed or is not on PATH. "
@@ -60,7 +64,10 @@ def load_ocr_documents(data_dir):
                 "Example: TESSERACT_CMD=C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
             ) from exc
         except Exception as exc:
-            print(f"Skipping OCR for {image_path}: {exc}")
+            try:
+                print(f"Skipping OCR for {image_path}: {exc}", file=sys.stderr)
+            except:
+                pass
             continue
 
         if text:
@@ -74,7 +81,10 @@ def load_ocr_documents(data_dir):
                 )
             )
         else:
-            print(f"No OCR text found in {image_path}")
+            try:
+                print(f"No OCR text found in {image_path}", file=sys.stderr)
+            except:
+                pass
 
     return ocr_docs
 
@@ -107,24 +117,30 @@ embeddings = OllamaEmbeddings(
 
 
 def build_vectorstore():
+    print("Loading source documents...")
     docs = load_source_documents()
 
     if not docs:
         raise ValueError(f"No documents found in {DATA_DIR.resolve()}")
 
+    print(f"Loaded {len(docs)} documents. Splitting into chunks...")
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=800,
-        chunk_overlap=100,
+        chunk_size=1500,  # Larger chunks = fewer embeddings = faster
+        chunk_overlap=150,
     )
     split_docs = text_splitter.split_documents(docs)
+    print(f"Split into {len(split_docs)} chunks. Building vector store...")
 
+    # Build vectorstore with batch processing and progress
     vectorstore = Chroma.from_documents(
         documents=split_docs,
         embedding=embeddings,
         collection_name=COLLECTION_NAME,
         persist_directory=str(CHROMA_DIR),
     )
+    print("Persisting vectorstore...")
     vectorstore.persist()
+    print("Done!")
     return vectorstore
 
 
@@ -142,12 +158,16 @@ def load_vectorstore():
 
 
 vectorstore = load_vectorstore()
-retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
+retriever = vectorstore.as_retriever(search_kwargs={"k": 2})  
 
 llm = OllamaLLM(
     model=LLM_MODEL,
     base_url=OLLAMA_BASE_URL,
     temperature=0.2,
+    num_predict=128,  # Reduced from 256 - shorter responses = faster
+    top_k=30,  # Reduced from 40
+    top_p=0.85,  # Reduced from 0.92 - narrows token choices
+    keep_alive=600,
 )
 
 prompt = ChatPromptTemplate.from_template(
@@ -179,8 +199,11 @@ rag_chain = (
 
 
 def ask_question(question):
-    response = rag_chain.invoke(question)
-    print("\nAnswer:\n", response)
+    """Stream responses for faster perceived speed."""
+    print("\nAnswer:\n", end="", flush=True)
+    for chunk in rag_chain.stream(question):
+        print(chunk, end="", flush=True)
+    print()
 
 
 if __name__ == "__main__":
