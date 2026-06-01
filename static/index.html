@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Research RAG</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <aside class="side-panel" aria-label="Workspace status">
+        <div class="brand-block">
+          <div class="brand-mark" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <div>
+            <p class="eyebrow">Local research assistant</p>
+            <h1>Research RAG</h1>
+          </div>
+        </div>
+
+        <div class="paper-stack" aria-hidden="true">
+          <div class="paper-card top">
+            <span></span>
+            <strong>Docs</strong>
+            <i></i>
+          </div>
+          <div class="paper-card middle"></div>
+          <div class="paper-card bottom"></div>
+        </div>
+
+        <section class="status-card" aria-label="System details">
+          <div>
+            <span>Model</span>
+            <strong id="modelName">Loading</strong>
+          </div>
+          <div>
+            <span>Retriever</span>
+            <strong id="retrieverK">-</strong>
+          </div>
+        </section>
+
+        <div class="source-strip">
+          <span>PDF</span>
+          <span>DOCX</span>
+          <span>TXT</span>
+        </div>
+      </aside>
+
+      <section class="chat-panel" aria-label="Research chat">
+        <header class="chat-header">
+          <div>
+            <p class="eyebrow">Ask your indexed knowledge base</p>
+            <h2>Find answers across files and papers</h2>
+          </div>
+          <button class="ghost-button" id="clearButton" type="button" title="Clear chat">
+            Clear
+          </button>
+        </header>
+
+        <div class="messages" id="messages" aria-live="polite">
+          <article class="message assistant">
+            <div class="avatar">R</div>
+            <div class="bubble">
+              <p>Ask me about your indexed documents. I will answer from retrieved context and show the sources I used.</p>
+            </div>
+          </article>
+        </div>
+
+        <form class="composer" id="questionForm">
+          <textarea
+            id="questionInput"
+            name="question"
+            rows="2"
+            placeholder="Ask a question about your research..."
+            autocomplete="off"
+          ></textarea>
+          <button type="submit" id="askButton">
+            Ask
+          </button>
+        </form>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
