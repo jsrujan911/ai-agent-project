@@ -7,9 +7,6 @@ import hashlib
 import re
 import shutil
 import sqlite3
-from urllib.parse import urlencode
-from urllib.request import Request, urlopen
-import xml.etree.ElementTree as ET
 
 from dotenv import load_dotenv
 import pytesseract
@@ -31,18 +28,13 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 load_dotenv()
 
 OLLAMA_BASE_URL = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
-LLM_MODEL = os.getenv("LLM_MODEL", "mistral")
+LLM_MODEL = os.getenv("LLM_MODEL", "llama3.2:1b")
 EMBEDDING_MODEL = "nomic-embed-text"
 DATA_DIR = Path("data")
 CHROMA_DIR = Path("chroma_db")
 COLLECTION_NAME = "ollama_rag_demo"
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 DOCUMENT_EXTENSIONS = {".txt", ".pdf", ".docx"} | IMAGE_EXTENSIONS
-ARXIV_API_URL = "https://export.arxiv.org/api/query"
-ARXIV_QUERY = os.getenv("ARXIV_QUERY", "").strip()
-ARXIV_MAX_RESULTS = int(os.getenv("ARXIV_MAX_RESULTS", "5"))
-ARXIV_SORT_BY = os.getenv("ARXIV_SORT_BY", "relevance")
-ARXIV_SORT_ORDER = os.getenv("ARXIV_SORT_ORDER", "descending")
 RETRIEVER_K = int(os.getenv("RETRIEVER_K", "3"))
 RETRIEVER_FETCH_K = int(os.getenv("RETRIEVER_FETCH_K", str(max(RETRIEVER_K * 4, 8))))
 SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.18"))
@@ -225,81 +217,6 @@ def load_ocr_documents(data_dir):
     return ocr_docs
 
 
-def load_arxiv_documents():
-    if not ARXIV_QUERY:
-        return []
-
-    query_params = {
-        "search_query": ARXIV_QUERY,
-        "start": 0,
-        "max_results": ARXIV_MAX_RESULTS,
-        "sortBy": ARXIV_SORT_BY,
-        "sortOrder": ARXIV_SORT_ORDER,
-    }
-    url = f"{ARXIV_API_URL}?{urlencode(query_params)}"
-    request = Request(url, headers={"User-Agent": "local-rag-assistant/1.0"})
-
-    try:
-        with urlopen(request, timeout=20) as response:
-            feed = response.read()
-    except Exception as exc:
-        print(f"Skipping arXiv source because the API request failed: {exc}", file=sys.stderr)
-        return []
-
-    namespace = {"atom": "http://www.w3.org/2005/Atom"}
-    root = ET.fromstring(feed)
-    docs = []
-
-    for entry in root.findall("atom:entry", namespace):
-        arxiv_id = entry.findtext("atom:id", default="", namespaces=namespace).strip()
-        title = " ".join(entry.findtext("atom:title", default="", namespaces=namespace).split())
-        summary = " ".join(entry.findtext("atom:summary", default="", namespaces=namespace).split())
-        published = entry.findtext("atom:published", default="", namespaces=namespace).strip()
-        updated = entry.findtext("atom:updated", default="", namespaces=namespace).strip()
-        authors = [
-            " ".join(author.findtext("atom:name", default="", namespaces=namespace).split())
-            for author in entry.findall("atom:author", namespace)
-        ]
-        authors = [author for author in authors if author]
-        pdf_url = ""
-
-        for link in entry.findall("atom:link", namespace):
-            if link.attrib.get("title") == "pdf":
-                pdf_url = link.attrib.get("href", "")
-                break
-
-        if not summary:
-            continue
-
-        content = (
-            f"Title: {title}\n"
-            f"Authors: {', '.join(authors)}\n"
-            f"Published: {published}\n"
-            f"Updated: {updated}\n"
-            f"arXiv URL: {arxiv_id}\n"
-            f"PDF URL: {pdf_url}\n\n"
-            f"Abstract:\n{summary}"
-        )
-        docs.append(
-            Document(
-                page_content=content,
-                metadata={
-                    "source": arxiv_id,
-                    "loader": "arxiv",
-                    "title": title,
-                    "authors": ", ".join(authors),
-                    "published": published,
-                    "updated": updated,
-                    "pdf_url": pdf_url,
-                    "arxiv_query": ARXIV_QUERY,
-                },
-            )
-        )
-
-    print(f"Loaded {len(docs)} arXiv documents for query: {ARXIV_QUERY}")
-    return docs
-
-
 def load_source_documents():
     docs = []
 
@@ -326,7 +243,6 @@ def load_source_documents():
     docs.extend(docx_loader.load())
 
     docs.extend(load_ocr_documents(DATA_DIR))
-    docs.extend(load_arxiv_documents())
     return docs
 
 
@@ -339,7 +255,7 @@ def file_signature(source):
     return f"{stat.st_size}:{stat.st_mtime_ns}"
 
 
-def local_source_signatures(data_dir):
+def local_source_signatures(data_dir):   
     signatures = {}
 
     for source_path in data_dir.rglob("*"):
@@ -410,7 +326,7 @@ def sync_vectorstore(vectorstore):
         if source not in legacy_sources and source_signatures.get(source) != signature
     ]
 
-    if not changed_sources and not ARXIV_QUERY:
+    if not changed_sources:
         print("No new or changed local files found. Vector store is up to date.")
         return vectorstore
 
@@ -536,7 +452,7 @@ retriever = vectorstore.as_retriever(search_kwargs={"k": RETRIEVER_K})
 llm = OllamaLLM(
     model=LLM_MODEL,
     base_url=OLLAMA_BASE_URL,
-    temperature=0.0,
+    temperature=0.2,
     num_predict=NUM_PREDICT,
     num_ctx=NUM_CTX,
     top_k=10,
